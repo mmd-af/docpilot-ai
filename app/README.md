@@ -28,6 +28,18 @@ curl -X POST http://localhost:8787/api/chat \
   -d '{"message":"How do I configure this project?"}'
 ```
 
+Check the health endpoint first:
+
+```sh
+curl http://localhost:8787/health
+```
+
+It should return `{"status": "ok"}`. If the browser reports
+`Unexpected token '<'`, the response was HTML rather than JSON. Open the
+browser developer tools, select the **Network** tab, and inspect the
+`POST /api/chat` response. The API should return JSON with either `response`
+or `error`; it should never return the HTML page.
+
 The AI binding must be available in the Cloudflare account used for deployment.
 Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in GitHub Actions secrets.
 
