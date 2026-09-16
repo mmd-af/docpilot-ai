@@ -42,6 +42,9 @@ class Default(WorkerEntrypoint):
         if request.method == "GET" and path.endswith("/health"):
             return self._json({"status": "ok"})
 
+        if request.method == "GET":
+            return await self.env.ASSETS.fetch(request)
+
         return Response("Not found", status=404)
 
     @staticmethod
