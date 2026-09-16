@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>DocPilot AI</title>
+</head>
+<body>
+<h2>DocPilot AI</h2>
+<input id="q" placeholder="Ask your question...">
+<button onclick="ask()">Ask</button>
+<p id="a"></p>
+
+<script>
+    async function ask() {
+        const q = document.getElementById('q').value;
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({message: q})
+        });
+        const data = await res.json();
+        document.getElementById('a').innerText = data.response;
+    }
+</script>
+</body>
+</html>
