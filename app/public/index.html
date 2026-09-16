@@ -15,8 +15,8 @@
 
 <script>
     async function ask() {
-        const answer = document.getElementById('a');
         const question = document.getElementById('q').value.trim();
+        const answer = document.getElementById('a');
 
         if (!question) {
             answer.innerText = 'Please enter a question.';
@@ -31,8 +31,10 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({message: question})
             });
-
-            const data = await res.json();
+            const contentType = res.headers.get('content-type') || '';
+            const data = contentType.includes('application/json')
+                ? await res.json()
+                : {error: `The server returned ${contentType || 'non-JSON'} content.`};
 
             if (!res.ok) {
                 throw new Error(data.error || `Request failed with status ${res.status}`);
