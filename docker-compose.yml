@@ -1,0 +1,17 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: docpilot-ai-dev
+
+    working_dir: /workspace/docpilot-ai
+
+    user: "${UID}:${GID}"
+
+    volumes:
+      - .:/workspace/docpilot-ai
+
+    stdin_open: true
+    tty: true
