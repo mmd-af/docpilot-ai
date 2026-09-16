@@ -37,7 +37,10 @@
                 : {error: `The server returned ${contentType || 'non-JSON'} content.`};
 
             if (!res.ok) {
-                throw new Error(data.error || `Request failed with status ${res.status}`);
+                const requestId = data.request_id ? ` (request: ${data.request_id})` : '';
+                throw new Error(
+                    `${data.error || `Request failed with status ${res.status}`}${requestId}`
+                );
             }
 
             answer.innerText = data.response;

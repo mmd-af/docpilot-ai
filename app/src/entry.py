@@ -1,7 +1,11 @@
 import json
+import logging
 from urllib.parse import urlparse
 
 from workers import Response, WorkerEntrypoint
+
+logger = logging.getLogger("docpilot")
+MODEL = "@cf/google/gemma-4-26b-a4b-it"
 
 
 class Default(WorkerEntrypoint):
@@ -21,7 +25,7 @@ class Default(WorkerEntrypoint):
 
             try:
                 result = await self.env.AI.run(
-                    "@cf/meta/llama-3.1-8b-instruct",
+                    MODEL,
                     {
                         "messages": [
                             {
@@ -32,12 +36,23 @@ class Default(WorkerEntrypoint):
                                 ),
                             },
                             {"role": "user", "content": user_message.strip()},
-                        ]
+                        ],
+                        "chat_template_kwargs": {"enable_thinking": False},
                     },
                 )
-            except Exception:
+            except Exception as error:
+                request_id = request.headers.get("cf-ray", "unknown")
+                logger.exception(
+                    "Workers AI request failed: model=%s request_id=%s error=%s",
+                    MODEL,
+                    request_id,
+                    error,
+                )
                 return self._json(
-                    {"error": "Workers AI could not complete this request."},
+                    {
+                        "error": "Workers AI could not complete this request.",
+                        "request_id": request_id,
+                    },
                     502,
                 )
 
