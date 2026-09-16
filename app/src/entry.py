@@ -4,6 +4,8 @@ from urllib.parse import urlparse
 
 from workers import Response, WorkerEntrypoint
 
+from rag import load_default_context
+
 logger = logging.getLogger("docpilot")
 MODEL = "@cf/google/gemma-4-26b-a4b-it"
 
@@ -23,6 +25,13 @@ class Default(WorkerEntrypoint):
             if len(user_message) > 8_000:
                 return self._json({"error": "The 'message' field is too long."}, 413)
 
+            context = load_default_context(user_message)
+            prompt = (
+                "Use only the provided documentation context. "
+                "If the answer is not supported by the context, say so clearly.\n\n"
+                f"Documentation context:\n{context}\n\nQuestion:\n{user_message.strip()}"
+            )
+
             try:
                 result = await self.env.AI.run(
                     MODEL,
@@ -32,10 +41,10 @@ class Default(WorkerEntrypoint):
                                 "role": "system",
                                 "content": (
                                     "You are DocPilot AI, a helpful documentation assistant. "
-                                    "If the answer is not supported by the provided context, say so."
+                                    "Answer only from the provided documentation context."
                                 ),
                             },
-                            {"role": "user", "content": user_message.strip()},
+                            {"role": "user", "content": prompt},
                         ],
                         "chat_template_kwargs": {"enable_thinking": False},
                     },
@@ -86,9 +95,15 @@ class Default(WorkerEntrypoint):
 
             choices = result.get("choices")
             if isinstance(choices, list) and choices:
-                message = choices[0].get("message")
-                if isinstance(message, dict):
-                    return message.get("content")
+                first_choice = choices[0]
+                if isinstance(first_choice, dict):
+                    message = first_choice.get("message")
+                    if isinstance(message, dict):
+                        content = message.get("content")
+                        if isinstance(content, str):
+                            return content
 
         response = getattr(result, "response", None)
-        return response if isinstance(response, str) else None
+        if isinstance(response, str):
+            return response
+        return None
