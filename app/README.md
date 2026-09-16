@@ -46,6 +46,17 @@ The Worker currently uses `@cf/google/gemma-4-26b-a4b-it` through the `AI`
 binding. If the API returns a `502`, use the returned `request_id` to find the
 corresponding exception in Cloudflare Workers Logs.
 
+## RAG v1
+
+This project now includes a simplified grounded-answer flow. The worker loads a
+small set of documentation snippets from `app/docs/overview.md` and scores them
+against the user's question before sending the prompt to the model. This is the
+first real RAG pattern: retrieval + context injection + answer generation.
+
+The logic lives in `app/src/rag.py` and is used by `app/src/entry.py` before the
+AI call. Replace this local documentation store later with Markdown ingestion,
+embeddings, and Vectorize once the project is ready for a real production search layer.
+
 ## Engineering roadmap
 
 1. **Baseline (current):** validate requests, call an LLM, return explicit errors,
