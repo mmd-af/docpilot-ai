@@ -15,14 +15,33 @@
 
 <script>
     async function ask() {
-        const q = document.getElementById('q').value;
-        const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({message: q})
-        });
-        const data = await res.json();
-        document.getElementById('a').innerText = data.response;
+        const answer = document.getElementById('a');
+        const question = document.getElementById('q').value.trim();
+
+        if (!question) {
+            answer.innerText = 'Please enter a question.';
+            return;
+        }
+
+        answer.innerText = 'Thinking...';
+
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: question})
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || `Request failed with status ${res.status}`);
+            }
+
+            answer.innerText = data.response;
+        } catch (error) {
+            answer.innerText = `Error: ${error.message}`;
+        }
     }
 </script>
 </body>
