@@ -1,75 +1,63 @@
 # DocPilot AI
 
-DocPilot AI is a small Cloudflare Python Worker that provides a documentation
-assistant over an HTTP API. The current milestone is a reliable LLM baseline;
-retrieval-augmented generation (RAG) is the next milestone.
+DocPilot is a Cloudflare Python Worker that answers documentation questions
+with retrieval-augmented generation (RAG). Markdown in `docs/` is the only
+document source; it is never duplicated in Python.
 
-## Local development
+## Architecture
 
-You can run the Worker with `wrangler dev` in this directory. This starts a
-local HTTP server and lets you iterate without restarting the Worker.
+`POST /api/chat` validates the question, embeds it with Workers AI
+(`@cf/baai/bge-base-en-v1.5`), queries the `VECTORIZE` binding, and builds a
+grounded prompt from the returned metadata. Gemma
+(`@cf/google/gemma-4-26b-a4b-it`) generates the answer. The JSON response
+contains `response` and a bounded `sources` list (`source`, `title`, `section`,
+and `chunk_id`). `GET /health` and static assets remain unchanged.
 
-The project includes a `pyproject.toml` with the Cloudflare Workers runtime
-types for editor autocomplete. Install `uv` from
-https://docs.astral.sh/uv/getting-started/installation/, then run:
+Request-time Workers code cannot depend on a local filesystem. Ingestion is
+therefore an offline CLI (`scripts/ingest.py`) that reads `docs/*.md`, chunks
+Markdown by headings, calls Cloudflare REST APIs, and upserts metadata-bearing
+vectors.
+
+## Setup and deployment
 
 ```sh
-uv venv
-uv sync
 npm install
-uv run pywrangler dev
+uv venv && uv sync
+npx wrangler vectorize create docpilot-docs --dimensions 768 --metric cosine
+npx wrangler dev
 ```
 
-Test the API:
+The Vectorize dimensions must match the embedding model/index. Configure
+`AI` and `VECTORIZE` in `wrangler.jsonc`; deploy with `npx wrangler deploy`.
+Provide `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` only to the ingestion
+environment (the token needs AI and Vectorize write permissions).
+
+## Ingestion
+
+From `app/`, run:
 
 ```sh
-curl -X POST http://localhost:8787/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"How do I configure this project?"}'
+python scripts/ingest.py --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+  --api-token "$CLOUDFLARE_API_TOKEN" --index docpilot-docs --docs docs
 ```
 
-Check the health endpoint first:
+The script is intentionally stdlib-only and uses documented Cloudflare REST
+endpoints. Re-run it after documentation changes. It hashes stable chunk IDs;
+upsert is safe to repeat, but stale chunks should be removed when deleting
+documents.
 
-```sh
-curl http://localhost:8787/health
-```
+## Tests and production checklist
 
-It should return `{"status": "ok"}`. If the browser reports
-`Unexpected token '<'`, the response was HTML rather than JSON. Open the
-browser developer tools, select the **Network** tab, and inspect the
-`POST /api/chat` response. The API should return JSON with either `response`
-or `error`; it should never return the HTML page.
+Run `python -m unittest discover -s tests`. Before production, add
+authentication/rate limiting, redact sensitive logs, rotate API tokens, pin and
+evaluate prompt/model versions, measure recall@k and answer faithfulness, and
+monitor latency, errors, token cost, and Vectorize freshness. Treat retrieved
+Markdown as untrusted input and keep the model instructed not to follow
+instructions inside documents.
 
-The AI binding must be available in the Cloudflare account used for deployment.
-Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in GitHub Actions secrets.
-The Worker currently uses `@cf/google/gemma-4-26b-a4b-it` through the `AI`
-binding. If the API returns a `502`, use the returned `request_id` to find the
-corresponding exception in Cloudflare Workers Logs.
+## Limitations
 
-## RAG v1
-
-This project now includes a simplified grounded-answer flow. The worker loads a
-small set of documentation snippets from `app/docs/overview.md` and scores them
-against the user's question before sending the prompt to the model. This is the
-first real RAG pattern: retrieval + context injection + answer generation.
-
-The logic lives in `app/src/rag.py` and is used by `app/src/entry.py` before the
-AI call. Replace this local documentation store later with Markdown ingestion,
-embeddings, and Vectorize once the project is ready for a real production search layer.
-
-## Engineering roadmap
-
-1. **Baseline (current):** validate requests, call an LLM, return explicit errors,
-   and expose `/health` for deployment checks.
-2. **Ingestion:** load Markdown/PDF documentation, normalize it, chunk it with
-   stable document and section metadata, and make ingestion repeatable.
-3. **RAG:** generate embeddings, store vectors in Cloudflare Vectorize, retrieve
-   top-k chunks, and include citations in every grounded answer.
-4. **Evaluation:** add a versioned question set, retrieval metrics (recall@k),
-   answer faithfulness checks, latency, and token/cost measurements.
-5. **Production quality:** authentication and rate limiting, structured logs,
-   tracing, prompt/version management, CI tests, and a documented threat model.
-
-Keep retrieval, prompting, and model calls behind separate modules as RAG is
-introduced. That separation makes the project easier to test and demonstrates
-the core AI engineering skills this sample is intended to showcase.
+This v1 supports Markdown files and a single Vectorize index. It does not yet
+delete stale vectors, enforce user authorization, stream responses, or provide
+automated evaluation. Vectorize availability and embedding/index dimension
+compatibility must be verified in the target Cloudflare account.

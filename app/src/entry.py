@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from workers import Response, WorkerEntrypoint
 
-from rag import load_default_context
+from rag import build_grounded_prompt, retrieve
 
 logger = logging.getLogger("docpilot")
 MODEL = "@cf/google/gemma-4-26b-a4b-it"
@@ -25,13 +25,22 @@ class Default(WorkerEntrypoint):
             if len(user_message) > 8_000:
                 return self._json({"error": "The 'message' field is too long."}, 413)
 
-            context = load_default_context(user_message)
-            prompt = (
-                "Use only the provided documentation context. "
-                "If the answer is not supported by the context, say so clearly.\n\n"
-                f"Documentation context:\n{context}\n\nQuestion:\n{user_message.strip()}"
-            )
+            try:
+                citations = await retrieve(self.env, user_message.strip())
+            except Exception as error:
+                request_id = request.headers.get("cf-ray", "unknown")
+                logger.exception(
+                    "RAG retrieval failed: request_id=%s error=%s", request_id, error
+                )
+                return self._json(
+                    {
+                        "error": "Documentation retrieval could not complete this request.",
+                        "request_id": request_id,
+                    },
+                    502,
+                )
 
+            prompt = build_grounded_prompt(user_message, citations)
             try:
                 result = await self.env.AI.run(
                     MODEL,
@@ -68,7 +77,18 @@ class Default(WorkerEntrypoint):
             response = self._model_response_text(result)
             if not isinstance(response, str):
                 return self._json({"error": "The model returned an invalid response."}, 502)
-            return self._json({"response": response})
+            return self._json({
+                "response": response,
+                "sources": [
+                    {
+                        "source": citation.source,
+                        "title": citation.title,
+                        "section": citation.section,
+                        "chunk_id": citation.chunk_id,
+                    }
+                    for citation in citations
+                ],
+            })
 
         if request.method == "GET" and path.endswith("/health"):
             return self._json({"status": "ok"})

@@ -1,82 +1,108 @@
+"""Request-time RAG helpers. Documents are ingested into Vectorize offline."""
+
+from dataclasses import dataclass
 import re
+from typing import Any
 
-DOCUMENTS = [
-    {
-        "title": "DocPilot overview",
-        "content": """
-DocPilot AI is a documentation assistant built with Cloudflare Workers.
-The project uses Cloudflare Workers AI and the Google Gemma model for chat generation.
-The application exposes a health endpoint at GET /health and a question endpoint at POST /api/chat.
-The project is designed to answer questions using documentation context instead of guessing.
-The long-term architecture includes ingestion, chunking, embeddings, and retrieval augmented generation.
-The project should keep a clear separation between document loading, retrieval, and LLM prompting.
-""".strip(),
-    },
-    {
-        "title": "AI engineering roadmap",
-        "content": """
-The AI engineering roadmap starts with a working LLM app, then adds a documentation store.
-Next steps include loading Markdown files, splitting them into chunks, generating embeddings, and storing vectors.
-A retrieval step selects the most relevant chunks for a user question and sends them to the model as context.
-The final answer should cite the source sections and state when the answer is not supported by the documents.
-Production quality also requires monitoring, rate limiting, testing, and evaluation metrics.
-""".strip(),
-    },
-]
+EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5"
+DEFAULT_TOP_K = 5
 
 
-def chunk_text(text, chunk_size=500, overlap=100):
-    normalized = re.sub(r"\s+", " ", text).strip()
-    if not normalized:
-        return []
-
-    chunks = []
-    start = 0
-    while start < len(normalized):
-        end = min(start + chunk_size, len(normalized))
-        chunks.append(normalized[start:end])
-        if end == len(normalized):
-            break
-        start = max(0, end - overlap)
-    return chunks
+@dataclass(frozen=True)
+class Citation:
+    source: str
+    title: str
+    section: str
+    chunk_id: str
+    text: str
 
 
-def rank_chunks(question, chunks):
-    q_tokens = {token.lower() for token in re.findall(r"[a-z0-9]+", question)}
-    ranked = []
-    for chunk in chunks:
-        score = 0
-        text = chunk.lower()
-        for token in q_tokens:
-            score += text.count(token)
-        ranked.append({"text": chunk, "score": score})
-    ranked.sort(key=lambda item: item["score"], reverse=True)
-    return ranked
+def chunk_markdown(markdown: str, source: str, chunk_size: int = 900, overlap: int = 120) -> list[dict[str, Any]]:
+    """Split Markdown by headings first, retaining enough metadata for citations."""
+    if chunk_size <= 0 or overlap < 0 or overlap >= chunk_size:
+        raise ValueError("chunk_size must be positive and overlap must be smaller")
+    lines = markdown.splitlines()
+    section = "Document"
+    pieces: list[dict[str, str]] = []
+    current: list[str] = []
+    for line in lines:
+        heading = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            if current:
+                pieces.append({"section": section, "text": "\n".join(current).strip()})
+                current = []
+            section = heading.group(1).strip()
+        elif line.strip():
+            current.append(line.strip())
+    if current:
+        pieces.append({"section": section, "text": "\n".join(current).strip()})
 
-
-def load_default_context(question, limit=3):
-    available_chunks = []
-    for doc in DOCUMENTS:
-        for chunk in chunk_text(doc["content"]):
-            available_chunks.append({"title": doc["title"], "text": chunk})
-
-    ranked = rank_chunks(question, [item["text"] for item in available_chunks])
-    selections = []
-    seen = set()
-
-    for item in ranked:
-        text = item["text"]
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        for doc_piece in available_chunks:
-            if doc_piece["text"] == text:
-                selections.append({"title": doc_piece["title"], "text": text})
+    result: list[dict[str, Any]] = []
+    for piece in pieces:
+        text = re.sub(r"\s+", " ", piece["text"]).strip()
+        start = 0
+        while start < len(text):
+            end = min(start + chunk_size, len(text))
+            chunk = text[start:end].strip()
+            if chunk:
+                index = len(result)
+                result.append({
+                    "id": f"{source}:{index}",
+                    "source": source,
+                    "title": source.rsplit("/", 1)[-1],
+                    "section": piece["section"],
+                    "text": chunk,
+                })
+            if end == len(text):
                 break
-        if len(selections) >= limit:
-            break
+            start = end - overlap
+    return result
 
-    if not selections:
-        return "No relevant documentation context was found for this question."
 
-    return "\n\n".join(f"[{item['title']}]\n{item['text']}" for item in selections)
+def _metadata(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def citations_from_matches(matches: Any, limit: int = DEFAULT_TOP_K) -> list[Citation]:
+    """Convert the untyped Vectorize response into bounded, safe citation records."""
+    if not isinstance(matches, list):
+        return []
+    citations: list[Citation] = []
+    for match in matches[: max(0, limit)]:
+        if not isinstance(match, dict):
+            continue
+        metadata = _metadata(match.get("metadata"))
+        text = metadata.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        citations.append(Citation(
+            source=str(metadata.get("source", "unknown")),
+            title=str(metadata.get("title", metadata.get("source", "Documentation"))),
+            section=str(metadata.get("section", "Document")),
+            chunk_id=str(match.get("id", "")),
+            text=text.strip(),
+        ))
+    return citations
+
+
+async def retrieve(env: Any, question: str, top_k: int = DEFAULT_TOP_K) -> list[Citation]:
+    """Embed a question and query the Vectorize binding without assuming response shape."""
+    embedding = await env.AI.run(EMBEDDING_MODEL, {"text": [question]})
+    vector = embedding.get("data", [None])[0] if isinstance(embedding, dict) else None
+    if not isinstance(vector, list) or not vector:
+        raise RuntimeError("Embedding model returned no vector")
+    matches = await env.VECTORIZE.query(vector, {"topK": max(1, min(top_k, 20)), "returnMetadata": "all"})
+    raw = matches.get("matches", []) if isinstance(matches, dict) else getattr(matches, "matches", [])
+    return citations_from_matches(raw, top_k)
+
+
+def build_grounded_prompt(question: str, citations: list[Citation]) -> str:
+    context = "\n\n".join(
+        f"[{citation.title} — {citation.section} | {citation.source}]\n{citation.text}"
+        for citation in citations
+    ) or "[No matching documentation was retrieved.]"
+    return (
+        "Answer the question using only the documentation excerpts below. "
+        "If they do not support an answer, say that clearly. Do not invent citations.\n\n"
+        f"Documentation excerpts:\n{context}\n\nQuestion:\n{question.strip()}"
+    )

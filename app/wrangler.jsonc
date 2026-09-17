@@ -26,6 +26,12 @@
   "ai": {
     "binding": "AI"
   },
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "docpilot-docs"
+    }
+  ],
   /**
    * Smart Placement
    * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
