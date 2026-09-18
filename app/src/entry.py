@@ -4,6 +4,8 @@ from urllib.parse import urlparse
 
 from workers import Response, WorkerEntrypoint
 
+from rag import build_grounded_prompt, retrieve
+
 logger = logging.getLogger("docpilot")
 MODEL = "@cf/google/gemma-4-26b-a4b-it"
 
@@ -24,6 +26,22 @@ class Default(WorkerEntrypoint):
                 return self._json({"error": "The 'message' field is too long."}, 413)
 
             try:
+                citations = await retrieve(self.env, user_message.strip())
+            except Exception as error:
+                request_id = request.headers.get("cf-ray", "unknown")
+                logger.exception(
+                    "RAG retrieval failed: request_id=%s error=%s", request_id, error
+                )
+                return self._json(
+                    {
+                        "error": "Documentation retrieval could not complete this request.",
+                        "request_id": request_id,
+                    },
+                    502,
+                )
+
+            prompt = build_grounded_prompt(user_message, citations)
+            try:
                 result = await self.env.AI.run(
                     MODEL,
                     {
@@ -32,10 +50,10 @@ class Default(WorkerEntrypoint):
                                 "role": "system",
                                 "content": (
                                     "You are DocPilot AI, a helpful documentation assistant. "
-                                    "If the answer is not supported by the provided context, say so."
+                                    "Answer only from the provided documentation context."
                                 ),
                             },
-                            {"role": "user", "content": user_message.strip()},
+                            {"role": "user", "content": prompt},
                         ],
                         "chat_template_kwargs": {"enable_thinking": False},
                     },
@@ -59,7 +77,18 @@ class Default(WorkerEntrypoint):
             response = self._model_response_text(result)
             if not isinstance(response, str):
                 return self._json({"error": "The model returned an invalid response."}, 502)
-            return self._json({"response": response})
+            return self._json({
+                "response": response,
+                "sources": [
+                    {
+                        "source": citation.source,
+                        "title": citation.title,
+                        "section": citation.section,
+                        "chunk_id": citation.chunk_id,
+                    }
+                    for citation in citations
+                ],
+            })
 
         if request.method == "GET" and path.endswith("/health"):
             return self._json({"status": "ok"})
@@ -86,9 +115,15 @@ class Default(WorkerEntrypoint):
 
             choices = result.get("choices")
             if isinstance(choices, list) and choices:
-                message = choices[0].get("message")
-                if isinstance(message, dict):
-                    return message.get("content")
+                first_choice = choices[0]
+                if isinstance(first_choice, dict):
+                    message = first_choice.get("message")
+                    if isinstance(message, dict):
+                        content = message.get("content")
+                        if isinstance(content, str):
+                            return content
 
         response = getattr(result, "response", None)
-        return response if isinstance(response, str) else None
+        if isinstance(response, str):
+            return response
+        return None
