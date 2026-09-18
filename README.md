@@ -238,6 +238,13 @@ npx wrangler vectorize create docpilot-docs \
   --metric cosine
 ```
 
+The deployment workflow also checks for this index and creates it
+automatically when it is missing. The `CLOUDFLARE_API_TOKEN` used by GitHub
+Actions therefore needs permission to manage Workers AI and Vectorize indexes,
+not only to deploy Worker scripts. If the workflow cannot create the index,
+create it once manually with the command above or grant the token the required
+Vectorize permission.
+
 The Worker binding is configured in `app/wrangler.jsonc`:
 
 ```jsonc
