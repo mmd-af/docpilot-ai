@@ -14,9 +14,10 @@ contains `response` and a bounded `sources` list (`source`, `title`, `section`,
 and `chunk_id`). `GET /health` and static assets remain unchanged.
 
 Request-time Workers code cannot depend on a local filesystem. Ingestion is
-therefore an offline CLI (`scripts/ingest.py`) that reads `docs/*.md`, chunks
+therefore a separate CLI (`scripts/ingest.py`) that reads `docs/*.md`, chunks
 Markdown by headings, calls Cloudflare REST APIs, and upserts metadata-bearing
-vectors.
+vectors. GitHub Actions runs this CLI automatically before deployment, so
+committing documentation is enough to refresh the production index.
 
 ## Setup and deployment
 
@@ -29,8 +30,10 @@ npx wrangler dev
 
 The Vectorize dimensions must match the embedding model/index. Configure
 `AI` and `VECTORIZE` in `wrangler.jsonc`; deploy with `npx wrangler deploy`.
-Provide `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` only to the ingestion
-environment (the token needs AI and Vectorize write permissions).
+Provide `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` only to the
+ingestion environment (the token needs Workers AI and Vectorize write
+permissions). The repository workflow supplies these values from GitHub
+Secrets; they do not belong in the browser or repository.
 
 ## Ingestion
 

@@ -37,8 +37,13 @@ jobs:
           set -euo pipefail
           index_name="docpilot-docs"
 
+          if ! index_list="$(npx wrangler vectorize list --json)"; then
+            echo "Could not list Vectorize indexes. Check the Cloudflare token, account ID, and permissions." >&2
+            exit 1
+          fi
+
           index_exists="$(
-            npx wrangler vectorize list --json |
+            printf '%s' "$index_list" |
               node -e '
                 let input = "";
                 process.stdin.on("data", chunk => input += chunk);
@@ -59,6 +64,17 @@ jobs:
           else
             echo "Vectorize index already exists: $index_name"
           fi
+
+      - name: Ingest documentation into Vectorize
+        working-directory: app
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          uv run python scripts/ingest.py \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --api-token "$CLOUDFLARE_API_TOKEN" \
+            --index docpilot-docs \
+            --docs docs
 
       - name: Deploy to Cloudflare Workers
         working-directory: app

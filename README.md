@@ -286,7 +286,10 @@ The token should be provided through an environment variable or a secret
 manager. Do not commit it to the repository. It needs permission to call
 Workers AI and write to Vectorize.
 
-The ingestion process:
+In the GitHub Actions deployment workflow, this process runs automatically
+after the index check and before the Worker deployment. Therefore, the normal
+content workflow is: add or update a Markdown file under `app/docs/`, commit
+it, and push to `main`. GitHub Actions then:
 
 1. Finds Markdown files recursively.
 2. Splits content at Markdown headings.
