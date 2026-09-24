@@ -26,6 +26,10 @@
   "ai": {
     "binding": "AI"
   },
+  "browser": {
+    "binding": "BROWSER",
+    "remote": true
+  },
   "vectorize": [
     {
       "binding": "VECTORIZE",

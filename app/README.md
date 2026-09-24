@@ -1,8 +1,8 @@
 # DocPilot AI
 
 DocPilot is a Cloudflare Python Worker that answers documentation questions
-with retrieval-augmented generation (RAG). Markdown in `docs/` is the only
-document source; it is never duplicated in Python.
+with retrieval-augmented generation (RAG). It also supports live answers from
+up to three public website URLs supplied by the user.
 
 ## Architecture
 
@@ -12,6 +12,13 @@ grounded prompt from the returned metadata. Gemma
 (`@cf/google/gemma-4-26b-a4b-it`) generates the answer. The JSON response
 contains `response` and a bounded `sources` list (`source`, `title`, `section`,
 and `chunk_id`). `GET /health` and static assets remain unchanged.
+
+`POST /api/live-chat` accepts `{ "message": "...", "urls": ["https://..."] }`.
+The Worker uses the Cloudflare Browser Run `markdown` Quick Action to render
+each URL, then sends bounded excerpts to Workers AI. Configure the `BROWSER`
+binding in `wrangler.jsonc`; local development requires remote bindings (for
+example `uv run pywrangler dev --remote`). This is URL retrieval, not a
+general-purpose web search engine.
 
 Request-time Workers code cannot depend on a local filesystem. Ingestion is
 therefore a separate CLI (`scripts/ingest.py`) that reads `docs/*.md`, chunks
@@ -63,4 +70,7 @@ instructions inside documents.
 This v1 supports Markdown files and a single Vectorize index. It does not yet
 delete stale vectors, enforce user authorization, stream responses, or provide
 automated evaluation. Vectorize availability and embedding/index dimension
-compatibility must be verified in the target Cloudflare account.
+compatibility must be verified in the target Cloudflare account. Live browsing
+currently accepts user-supplied public URLs only; it does not crawl an entire
+site or search the open web. Browser Run availability, limits, and pricing
+must be checked in the target Cloudflare account.

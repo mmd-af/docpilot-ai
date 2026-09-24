@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 
 from workers import Response, WorkerEntrypoint
 
+from browsing import build_live_prompt, retrieve_web_sources
 from rag import build_grounded_prompt, retrieve
 
 logger = logging.getLogger("docpilot")
@@ -13,7 +14,7 @@ MODEL = "@cf/google/gemma-4-26b-a4b-it"
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
         path = urlparse(request.url).path.rstrip("/")
-        if request.method == "POST" and path.endswith("/api/chat"):
+        if request.method == "POST" and path.endswith(("/api/chat", "/api/live-chat")):
             try:
                 body = await request.json()
             except (TypeError, ValueError):
@@ -25,22 +26,59 @@ class Default(WorkerEntrypoint):
             if len(user_message) > 8_000:
                 return self._json({"error": "The 'message' field is too long."}, 413)
 
-            try:
-                citations = await retrieve(self.env, user_message.strip())
-            except Exception as error:
-                request_id = request.headers.get("cf-ray", "unknown")
-                logger.exception(
-                    "RAG retrieval failed: request_id=%s error=%s", request_id, error
-                )
-                return self._json(
-                    {
-                        "error": "Documentation retrieval could not complete this request.",
-                        "request_id": request_id,
-                    },
-                    502,
-                )
+            if path.endswith("/api/live-chat"):
+                try:
+                    sources = await retrieve_web_sources(self.env.BROWSER, body.get("urls"))
+                except ValueError as error:
+                    return self._json({"error": str(error)}, 400)
+                except Exception as error:
+                    request_id = request.headers.get("cf-ray", "unknown")
+                    logger.exception(
+                        "Live website retrieval failed: request_id=%s error=%s",
+                        request_id,
+                        error,
+                    )
+                    return self._json(
+                        {
+                            "error": "A website could not be read. Check the URL and try again.",
+                            "request_id": request_id,
+                        },
+                        502,
+                    )
+                prompt = build_live_prompt(user_message, sources)
+                response_sources = [
+                    {"url": source.url, "title": source.title}
+                    for source in sources
+                ]
+            else:
+                prompt = None
+                response_sources = None
 
-            prompt = build_grounded_prompt(user_message, citations)
+            if prompt is None:
+                try:
+                    citations = await retrieve(self.env, user_message.strip())
+                except Exception as error:
+                    request_id = request.headers.get("cf-ray", "unknown")
+                    logger.exception(
+                        "RAG retrieval failed: request_id=%s error=%s", request_id, error
+                    )
+                    return self._json(
+                        {
+                            "error": "Documentation retrieval could not complete this request.",
+                            "request_id": request_id,
+                        },
+                        502,
+                    )
+                prompt = build_grounded_prompt(user_message, citations)
+                response_sources = [
+                    {
+                        "source": citation.source,
+                        "title": citation.title,
+                        "section": citation.section,
+                        "chunk_id": citation.chunk_id,
+                    }
+                    for citation in citations
+                ]
             try:
                 result = await self.env.AI.run(
                     MODEL,
@@ -79,15 +117,7 @@ class Default(WorkerEntrypoint):
                 return self._json({"error": "The model returned an invalid response."}, 502)
             return self._json({
                 "response": response,
-                "sources": [
-                    {
-                        "source": citation.source,
-                        "title": citation.title,
-                        "section": citation.section,
-                        "chunk_id": citation.chunk_id,
-                    }
-                    for citation in citations
-                ],
+                "sources": response_sources,
             })
 
         if request.method == "GET" and path.endswith("/health"):

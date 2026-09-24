@@ -2,50 +2,156 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>DocPilot AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Understand official documentation with AI">
+    <title>DocPilot AI | Guided answers from official websites</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0b1020;
+            --panel: rgba(21, 30, 54, .88);
+            --muted: #9ca9c9;
+            --text: #f2f5ff;
+            --accent: #8b7cff;
+            --accent-strong: #6d5dfc;
+            --line: rgba(180, 193, 235, .18);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            font: 16px/1.55 Inter, ui-sans-serif, system-ui, sans-serif;
+            background: radial-gradient(circle at 20% 0%, #1d2750, transparent 42%), var(--bg);
+        }
+        main { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0; }
+        .eyebrow { color: #aaa1ff; font-size: .8rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+        h1 { max-width: 680px; margin: 12px 0; font-size: clamp(2.2rem, 7vw, 4.5rem); line-height: 1.05; letter-spacing: -.05em; }
+        .intro { max-width: 630px; margin: 0 0 32px; color: var(--muted); font-size: 1.1rem; }
+        .panel { padding: 24px; border: 1px solid var(--line); border-radius: 22px; background: var(--panel); box-shadow: 0 24px 70px rgba(0, 0, 0, .25); backdrop-filter: blur(18px); }
+        label { display: block; margin-bottom: 8px; color: #c8d1ed; font-size: .9rem; font-weight: 700; }
+        textarea, input {
+            width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px;
+            color: var(--text); background: rgba(4, 8, 20, .6); font: inherit; outline: none;
+        }
+        textarea { min-height: 105px; resize: vertical; }
+        textarea:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 124, 255, .18); }
+        .url-row { display: flex; gap: 10px; margin-top: 18px; }
+        .url-row input { flex: 1; }
+        button { border: 0; border-radius: 11px; padding: 12px 17px; color: white; background: var(--accent-strong); font: inherit; font-weight: 750; cursor: pointer; }
+        button:hover { background: var(--accent); }
+        button:disabled { cursor: wait; opacity: .55; }
+        .secondary { color: #d4d9ee; background: rgba(255, 255, 255, .09); }
+        .secondary:hover { background: rgba(255, 255, 255, .15); }
+        .url-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .url-chip { display: inline-flex; max-width: 100%; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; color: #d7ddf4; background: rgba(255, 255, 255, .06); font-size: .85rem; }
+        .url-chip button { padding: 0; color: #abb5d7; background: none; font-size: 1rem; line-height: 1; }
+        .hint { margin: 10px 0 0; color: var(--muted); font-size: .85rem; }
+        .actions { display: flex; justify-content: flex-end; margin-top: 22px; }
+        #answer { display: none; margin-top: 22px; white-space: pre-wrap; }
+        #answer.visible { display: block; }
+        #status { min-height: 1.4em; margin: 12px 0 0; color: var(--muted); }
+        .sources { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+        .sources a { display: block; overflow: hidden; color: #bcb3ff; text-overflow: ellipsis; white-space: nowrap; }
+        @media (max-width: 600px) { main { padding: 36px 0; } .url-row { display: block; } .url-row button { width: 100%; margin-top: 9px; } }
+    </style>
 </head>
 <body>
-<h2>DocPilot AI</h2>
-<input id="q" placeholder="Ask your question...">
-<button onclick="ask()">Ask</button>
-<p id="a"></p>
-
+<main>
+    <div class="eyebrow">DocPilot AI</div>
+    <h1>Turn difficult websites into clear next steps.</h1>
+    <p class="intro">Ask in your language. Add official websites, and DocPilot will read the current pages, translate the relevant information, and explain what to do.</p>
+    <section class="panel" aria-label="Ask DocPilot">
+        <label for="question">What problem are you trying to solve?</label>
+        <textarea id="question" placeholder="For example: My Romanian residence permit is expiring. What should I do?"></textarea>
+        <div class="url-row">
+            <input id="website" type="url" placeholder="https://workinromania.gov.ro/">
+            <button class="secondary" type="button" onclick="addWebsite()">Add website</button>
+        </div>
+        <div id="url-list" class="url-list" aria-live="polite"></div>
+        <p class="hint">Add up to 3 public http(s) websites. Use official sources for legal, immigration, health, or government questions.</p>
+        <div class="actions"><button id="ask-button" type="button" onclick="ask()">Read websites and answer</button></div>
+        <p id="status" role="status"></p>
+        <div id="answer" class="panel"></div>
+    </section>
+</main>
 <script>
-    async function ask() {
-        const question = document.getElementById('q').value.trim();
-        const answer = document.getElementById('a');
+    const websites = [];
+    const question = document.getElementById('question');
+    const website = document.getElementById('website');
+    const urlList = document.getElementById('url-list');
+    const status = document.getElementById('status');
+    const answer = document.getElementById('answer');
+    const askButton = document.getElementById('ask-button');
 
-        if (!question) {
-            answer.innerText = 'Please enter a question.';
+    function renderWebsites() {
+        urlList.replaceChildren(...websites.map((url, index) => {
+            const chip = document.createElement('span');
+            chip.className = 'url-chip';
+            chip.title = url;
+            chip.append(document.createTextNode(url));
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.setAttribute('aria-label', `Remove ${url}`);
+            remove.textContent = '×';
+            remove.onclick = () => { websites.splice(index, 1); renderWebsites(); };
+            chip.append(remove);
+            return chip;
+        }));
+    }
+
+    function addWebsite() {
+        const url = website.value.trim();
+        if (!url || websites.includes(url)) return;
+        if (websites.length >= 3) {
+            status.textContent = 'You can add up to 3 websites.';
             return;
         }
+        websites.push(url);
+        website.value = '';
+        status.textContent = '';
+        renderWebsites();
+    }
 
-        answer.innerText = 'Thinking...';
+    website.addEventListener('keydown', event => { if (event.key === 'Enter') addWebsite(); });
 
+    async function ask() {
+        const message = question.value.trim();
+        if (!message) { status.textContent = 'Describe your problem first.'; question.focus(); return; }
+        if (!websites.length) { status.textContent = 'Add at least one website to read.'; website.focus(); return; }
+        askButton.disabled = true;
+        answer.classList.add('visible');
+        answer.textContent = '';
+        status.textContent = 'Reading the websites and preparing a grounded answer…';
         try {
-            const res = await fetch('/api/chat', {
+            const res = await fetch('/api/live-chat', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({message: question})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, urls: websites })
             });
-            const contentType = res.headers.get('content-type') || '';
-            const data = contentType.includes('application/json')
-                ? await res.json()
-                : {error: `The server returned ${contentType || 'non-JSON'} content.`};
-
-            if (!res.ok) {
-                const requestId = data.request_id ? ` (request: ${data.request_id})` : '';
-                throw new Error(
-                    `${data.error || `Request failed with status ${res.status}`}${requestId}`
-                );
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+            answer.textContent = data.response || 'No answer was returned.';
+            if (Array.isArray(data.sources) && data.sources.length) {
+                const sources = document.createElement('div');
+                sources.className = 'sources';
+                sources.innerHTML = '<strong>Sources read</strong>';
+                data.sources.forEach(source => {
+                    const link = document.createElement('a');
+                    link.href = source.url;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    link.textContent = source.url;
+                    sources.append(link);
+                });
+                answer.append(sources);
             }
-
-            answer.innerText = data.response;
+            status.textContent = 'Answer based on the pages you provided. Verify urgent or legal decisions with the official authority.';
         } catch (error) {
-            answer.innerText = `Error: ${error.message}`;
+            answer.textContent = '';
+            status.textContent = `Could not complete the request: ${error.message}`;
+        } finally {
+            askButton.disabled = false;
         }
     }
 </script>

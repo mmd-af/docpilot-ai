@@ -1,5 +1,6 @@
 import unittest
 
+from src.browsing import build_live_prompt, validate_public_url
 from src.rag import Citation, build_grounded_prompt, chunk_markdown
 
 
@@ -16,6 +17,25 @@ class RagTests(unittest.TestCase):
         )])
         self.assertIn("docs/a.md", prompt)
         self.assertIn("Use Workers.", prompt)
+
+    def test_live_prompt_contains_source_url(self):
+        source = type("Source", (), {
+            "url": "https://example.com/help",
+            "content": "Apply before the permit expires.",
+        })()
+        prompt = build_live_prompt("What should I do?", [source])
+        self.assertIn("https://example.com/help", prompt)
+        self.assertIn("Apply before the permit expires.", prompt)
+
+    def test_private_urls_are_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_public_url("http://127.0.0.1/admin")
+
+    def test_public_urls_are_accepted(self):
+        self.assertEqual(
+            validate_public_url("https://workinromania.gov.ro/"),
+            "https://workinromania.gov.ro/",
+        )
 
 
 if __name__ == "__main__":
