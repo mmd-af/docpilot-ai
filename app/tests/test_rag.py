@@ -1,6 +1,11 @@
 import unittest
 
-from src.browsing import _html_to_text, build_live_prompt, validate_public_url
+from src.browsing import (
+    _html_to_text,
+    build_live_prompt,
+    retrieve_web_sources,
+    validate_public_url,
+)
 from src.rag import Citation, build_grounded_prompt, chunk_markdown
 
 
@@ -42,6 +47,22 @@ class RagTests(unittest.TestCase):
             _html_to_text("<h1>Hello</h1><script>ignore()</script><p>World</p>"),
             "Hello World",
         )
+
+    def test_live_retrieval_keeps_readable_sources_when_one_fails(self):
+        class Browser:
+            async def quickAction(self, action, options):
+                if "bad.example" in options["url"]:
+                    raise RuntimeError("unavailable")
+                return {"result": "# Good source"}
+
+        import asyncio
+
+        sources, failures = asyncio.run(retrieve_web_sources(
+            Browser(),
+            ["https://good.example/", "https://bad.example/"],
+        ))
+        self.assertEqual([source.url for source in sources], ["https://good.example/"])
+        self.assertEqual(failures, ["https://bad.example/"])
 
 
 if __name__ == "__main__":

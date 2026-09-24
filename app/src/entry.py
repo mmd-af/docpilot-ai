@@ -28,7 +28,9 @@ class Default(WorkerEntrypoint):
 
             if path.endswith("/api/live-chat"):
                 try:
-                    sources = await retrieve_web_sources(self.env.BROWSER, body.get("urls"))
+                    sources, failed_urls = await retrieve_web_sources(
+                        self.env.BROWSER, body.get("urls")
+                    )
                 except ValueError as error:
                     return self._json({"error": str(error)}, 400)
                 except Exception as error:
@@ -53,6 +55,11 @@ class Default(WorkerEntrypoint):
                     {"url": source.url, "title": source.title}
                     for source in sources
                 ]
+                if failed_urls:
+                    response_sources.extend(
+                        {"url": url, "error": "This URL could not be read."}
+                        for url in failed_urls
+                    )
             else:
                 prompt = None
                 response_sources = None

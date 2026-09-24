@@ -112,16 +112,25 @@ async def fetch_markdown(browser: Any, url: str) -> WebSource:
     return await _fallback_fetch(url)
 
 
-async def retrieve_web_sources(browser: Any, urls: list[Any]) -> list[WebSource]:
+async def retrieve_web_sources(
+    browser: Any, urls: list[Any]
+) -> tuple[list[WebSource], list[str]]:
     if not isinstance(urls, list) or not urls:
         raise ValueError("Provide at least one website URL.")
     if len(urls) > MAX_URLS:
         raise ValueError(f"Provide no more than {MAX_URLS} website URLs.")
 
     sources: list[WebSource] = []
+    failures: list[str] = []
     total_chars = 0
     for value in urls:
-        source = await fetch_markdown(browser, validate_public_url(value))
+        try:
+            source = await fetch_markdown(browser, validate_public_url(value))
+        except ValueError:
+            raise
+        except Exception:
+            failures.append(str(value).strip() or "unknown URL")
+            continue
         remaining = MAX_TOTAL_CHARS - total_chars
         if remaining <= 0:
             break
@@ -133,7 +142,7 @@ async def retrieve_web_sources(browser: Any, urls: list[Any]) -> list[WebSource]
         total_chars += len(sources[-1].content)
     if not sources:
         raise RuntimeError("No readable website content was retrieved.")
-    return sources
+    return sources, failures
 
 
 def build_live_prompt(question: str, sources: list[WebSource]) -> str:

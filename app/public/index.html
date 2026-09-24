@@ -65,7 +65,7 @@
         <label for="question">What problem are you trying to solve?</label>
         <textarea id="question" placeholder="For example: My Romanian residence permit is expiring. What should I do?"></textarea>
         <div class="url-row">
-            <input id="website" type="url" placeholder="https://workinromania.gov.ro/">
+            <input id="website" type="url" placeholder="https://official-website.example/">
             <button class="secondary" type="button" onclick="addWebsite()">Add website</button>
         </div>
         <div id="url-list" class="url-list" aria-live="polite"></div>
@@ -141,7 +141,7 @@
                     link.href = source.url;
                     link.target = '_blank';
                     link.rel = 'noopener noreferrer';
-                    link.textContent = source.url;
+                        link.textContent = source.error ? `${source.url} (could not be read)` : source.url;
                     sources.append(link);
                 });
                 answer.append(sources);
