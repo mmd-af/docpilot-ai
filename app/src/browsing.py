@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import ipaddress
+import re
 from urllib.parse import urlparse
 from typing import Any
 
@@ -52,17 +53,63 @@ def _result_text(result: Any) -> str | None:
     return content if isinstance(content, str) else None
 
 
+async def _response_result(result: Any) -> Any:
+    """Read a Browser Run Fetch Response or return its already-decoded value."""
+    if isinstance(result, (str, dict)):
+        return result
+    json_reader = getattr(result, "json", None)
+    if callable(json_reader):
+        try:
+            return await json_reader()
+        except Exception:
+            pass
+    text_reader = getattr(result, "text", None)
+    if callable(text_reader):
+        return await text_reader()
+    return result
+
+
+def _html_to_text(html: str) -> str:
+    """Provide a readable fallback when Browser Run is temporarily unavailable."""
+    without_scripts = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\1>", " ", html)
+    without_tags = re.sub(r"(?s)<[^>]+>", " ", without_scripts)
+    return re.sub(r"\s+", " ", without_tags).strip()
+
+
+async def _fallback_fetch(url: str) -> WebSource:
+    """Fetch static HTML through the Worker runtime as a Browser Run fallback."""
+    from js import fetch
+
+    response = await fetch(url, {
+        "headers": {"Accept": "text/html,application/xhtml+xml,text/plain"},
+        "redirect": "follow",
+    })
+    if not response.ok:
+        raise RuntimeError(f"Direct website fetch returned HTTP {response.status}.")
+    content = _html_to_text(await response.text())
+    if not content:
+        raise RuntimeError("The website returned no readable content.")
+    return WebSource(
+        url=url,
+        title=urlparse(url).netloc,
+        content=content[:MAX_PAGE_CHARS],
+    )
+
+
 async def fetch_markdown(browser: Any, url: str) -> WebSource:
     """Fetch readable, rendered Markdown for one public URL."""
-    result = await browser.quickAction("markdown", {
-        "url": url,
-        "gotoOptions": {"waitUntil": "networkidle2"},
-    })
-    content = _result_text(result)
-    if not content or not content.strip():
-        raise RuntimeError("The website returned no readable content.")
-    title = urlparse(url).netloc
-    return WebSource(url=url, title=title, content=content[:MAX_PAGE_CHARS].strip())
+    try:
+        result = await browser.quickAction("markdown", {
+            "url": url,
+            "gotoOptions": {"waitUntil": "networkidle2"},
+        })
+        content = _result_text(await _response_result(result))
+        if content and content.strip():
+            title = urlparse(url).netloc
+            return WebSource(url=url, title=title, content=content[:MAX_PAGE_CHARS].strip())
+    except Exception:
+        pass
+    return await _fallback_fetch(url)
 
 
 async def retrieve_web_sources(browser: Any, urls: list[Any]) -> list[WebSource]:

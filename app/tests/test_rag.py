@@ -1,6 +1,6 @@
 import unittest
 
-from src.browsing import build_live_prompt, validate_public_url
+from src.browsing import _html_to_text, build_live_prompt, validate_public_url
 from src.rag import Citation, build_grounded_prompt, chunk_markdown
 
 
@@ -35,6 +35,12 @@ class RagTests(unittest.TestCase):
         self.assertEqual(
             validate_public_url("https://workinromania.gov.ro/"),
             "https://workinromania.gov.ro/",
+        )
+
+    def test_html_fallback_removes_scripts_and_tags(self):
+        self.assertEqual(
+            _html_to_text("<h1>Hello</h1><script>ignore()</script><p>World</p>"),
+            "Hello World",
         )
 
 

@@ -40,7 +40,10 @@ class Default(WorkerEntrypoint):
                     )
                     return self._json(
                         {
-                            "error": "A website could not be read. Check the URL and try again.",
+                            "error": (
+                                "A website could not be read. The site may be blocking "
+                                "automated access or may be temporarily unavailable."
+                            ),
                             "request_id": request_id,
                         },
                         502,
